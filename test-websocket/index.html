@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Realtime Quotes</title>
+    <style>
+        :root {
+            --bg: #0b0f14;
+            --card: #0f1620;
+            --muted: #8aa0b4;
+            --text: #e6eef7;
+            --up: #21c55d;
+            --down: #ef4444;
+            --neutral: #a1a1aa;
+            --ring: #1f2a37;
+            --row-hover: #13202b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        #connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .connected {
+            background-color: var(--up);
+        }
+
+        .disconnected {
+            background-color: var(--down);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            text-align: right;
+            border-bottom: 1px solid var(--ring);
+        }
+
+        th {
+            background: var(--card);
+            color: var(--muted);
+            position: sticky;
+            top: 0;
+        }
+
+        td:first-child,
+        th:first-child {
+            text-align: left;
+        }
+
+        tr:hover {
+            background: var(--row-hover);
+        }
+
+        .positive {
+            color: var(--up);
+        }
+
+        .negative {
+            color: var(--down);
+        }
+
+        .neutral {
+            color: var(--neutral);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div id="connection-status" class="disconnected">Disconnected</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Mã</th>
+                    <th>Giá khớp</th>
+                    <th>Thay đổi</th>
+                    <th>% Thay đổi</th>
+                    <th>KL Khớp</th>
+                    <th>Cao nhất</th>
+                    <th>Thấp nhất</th>
+                    <th>Giá tham chiếu</th>
+                </tr>
+            </thead>
+            <tbody id="quotes-table"></tbody>
+        </table>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <script>
+        const backendUrl = 'http://localhost:8080'; // URL backend
+        const socket = io(backendUrl);
+
+        const quotesData = new Map();
+        const tbody = document.getElementById('quotes-table');
+        const statusEl = document.getElementById('connection-status');
+
+        function updateConnectionStatus(connected) {
+            statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+            statusEl.className = connected ? 'connected' : 'disconnected';
+        }
+
+        function formatNumber(value, decimals = 2) {
+            return value !== undefined && value !== null
+                ? Number(value).toLocaleString('vi-VN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+                : '-';
+        }
+
+        function getChangeClass(value) {
+            if (value > 0) return 'positive';
+            if (value < 0) return 'negative';
+            return 'neutral';
+        }
+
+        function updateTable(quote) {
+            quotesData.set(quote.symbol, quote);
+            renderTable();
+        }
+
+        function renderTable() {
+            tbody.innerHTML = '';
+            for (const quote of quotesData.values()) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${quote.symbol || '-'}</td>
+                    <td class="${getChangeClass(quote.matchPrice - quote.referencePrice)}">${formatNumber(quote.matchPrice)}</td>
+                    <td class="${getChangeClass(quote.changedValue)}">${formatNumber(quote.changedValue)}</td>
+                    <td class="${getChangeClass(quote.changedRatio)}">${formatNumber(quote.changedRatio)}%</td>
+                    <td>${formatNumber(quote.totalVolumeTraded, 0)}</td>
+                    <td>${formatNumber(quote.highestPrice)}</td>
+                    <td>${formatNumber(quote.lowestPrice)}</td>
+                    <td>${formatNumber(quote.referencePrice)}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        // Socket.IO events
+        socket.on('connect', () => {
+            console.log('✅ Connected to server');
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            console.warn('⚠️ Disconnected from server');
+            updateConnectionStatus(false);
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error('Connection Error:', err);
+            updateConnectionStatus(false);
+        });
+
+        socket.on('quote-update', (quote) => {
+            if (quote && quote.symbol) {
+                updateTable(quote);
+            }
+        });
+
+        // Load initial data
+        fetch(`${backendUrl}/quotes`)
+            .then(response => {
+                if (!response.ok) throw new Error('Network error');
+                return response.json();
+            })
+            .then(quotes => {
+                quotes.forEach(q => {
+                    if (q.symbol) updateTable(q);
+                });
+            })
+            .catch(err => console.error('Error loading initial data:', err));
+    </script>
+</body>
+
+</html>

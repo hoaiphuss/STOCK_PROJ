@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realtime Stock Quotes</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #4CAF50;
+        }
+
+        #quotes-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .quote-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.3s ease;
+        }
+
+        .quote-item:last-child {
+            border-bottom: none;
+        }
+
+        .quote-item:hover {
+            background-color: #f9f9f9;
+        }
+
+        .quote-item .symbol {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: #2c3e50;
+        }
+
+        .quote-item .price {
+            font-size: 1.1em;
+            color: #34495e;
+        }
+
+        .quote-item .change {
+            font-size: 0.9em;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: #fff;
+        }
+
+        .quote-item .change.positive {
+            background-color: #2ecc71;
+            /* Green */
+        }
+
+        .quote-item .change.negative {
+            background-color: #e74c3c;
+            /* Red */
+        }
+
+        .quote-item .change.no-change {
+            background-color: #bdc3c7;
+            /* Gray */
+        }
+
+        .info {
+            font-size: 0.8em;
+            color: #7f8c8d;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>Realtime Stock Quotes</h1>
+        <ul id="quotes-list"></ul>
+        <p class="info">
+            Connecting to the server...
+        </p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <script>
+        const backendUrl = 'http://localhost:8080'; // Change to your backend URL if different
+        const socket = io(backendUrl);
+
+        const quotesList = document.getElementById('quotes-list');
+        const infoText = document.querySelector('.info');
+
+        // Function to format numbers
+        const formatNumber = (num) => {
+            return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        // Function to handle new quote updates
+        const handleQuoteUpdate = (quote) => {
+            let quoteItem = document.getElementById(quote.symbol);
+
+            // Create new element if it doesn't exist
+            if (!quoteItem) {
+                quoteItem = document.createElement('li');
+                quoteItem.id = quote.symbol;
+                quoteItem.className = 'quote-item';
+                quotesList.appendChild(quoteItem);
+            }
+
+            // Determine the class for the change indicator
+            let changeClass = 'no-change';
+            if (quote.changedValue > 0) {
+                changeClass = 'positive';
+            } else if (quote.changedValue < 0) {
+                changeClass = 'negative';
+            }
+
+            // Update the content
+            quoteItem.innerHTML = `
+            <span class="symbol">${quote.symbol}</span>
+            <span class="price">${formatNumber(quote.matchPrice)}</span>
+            <span class="change ${changeClass}">
+                ${formatNumber(quote.changedValue)} (${formatNumber(quote.changedRatio)}%)
+            </span>
+        `;
+        };
+
+        // Listen for connection status
+        socket.on('connect', () => {
+            infoText.textContent = 'Connected to the server. Awaiting real-time data...';
+        });
+
+        socket.on('disconnect', () => {
+            infoText.textContent = 'Disconnected from the server. Attempting to reconnect...';
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error('Connection Error:', err);
+            infoText.textContent = 'Connection failed. Please ensure the backend is running.';
+        });
+
+        // Listen for 'quote-update' events from the server
+        socket.on('quote-update', (quote) => {
+            if (quote && quote.symbol) {
+                handleQuoteUpdate(quote);
+            }
+        });
+
+        // Fetch initial data on page load
+        fetch(`${backendUrl}/quotes`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(quotes => {
+                infoText.textContent = 'Initial data loaded successfully.';
+                quotes.forEach(quote => {
+                    // Ensure a valid quote object is passed
+                    if (quote.symbol && quote.matchPrice !== undefined && quote.changedValue !== undefined) {
+                        handleQuoteUpdate(quote);
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Failed to fetch initial quotes:', error);
+                infoText.textContent = `Error fetching initial data: ${error.message}`;
+            });
+
+    </script>
+</body>
+
+</html>
