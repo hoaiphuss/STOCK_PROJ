@@ -11,7 +11,7 @@ export class QuoteController {
 
   @Get()
   async getAllQuotes() {
-    return this.quoteModel.find().limit(50).sort({ updatedAt: -1 });
+    return this.quoteModel.find();
   }
 
   @Get(':symbol')

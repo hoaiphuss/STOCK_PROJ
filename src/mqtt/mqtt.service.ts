@@ -1,4 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  NotFoundException,
+} from '@nestjs/common';
 import * as mqtt from 'mqtt';
 import { AuthService } from '../auth/auth.service';
 import { Quote } from 'src/quotes/schemas/quote.schema';
@@ -8,61 +13,78 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
   private client: mqtt.MqttClient | null = null;
-  private reconnectDelay = 5000; // 5s
   private lastMessageTime = Date.now();
+
+  // timers
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private dailyReconnectTimer: NodeJS.Timeout | null = null;
+
+  // backoff config
+  private reconnectDelay = 5000; // 5s start
+  private readonly reconnectMaxDelay = 60000; // 60s max
 
   constructor(
     private readonly quoteService: QuoteService,
     private readonly authService: AuthService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
   ) {}
 
-  // Khi module khởi tạo:
-  // Kết nối broker một lần, rồi bật health check định kỳ.
   async onModuleInit() {
     await this.connectToBroker();
     this.startHealthCheck();
+    this.startDailyReconnect();
   }
 
-  // Khi App tắt:
-  // Clear Interval + đóng Socket MQTT (force close với true)
   async onModuleDestroy() {
     this.stopHealthCheck();
+    this.stopDailyReconnect();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.client?.end(true);
   }
 
-  // Mục đích: có những trường hợp "kênh đứng" nhưng không phát sinh error/close
-  // Nếu 30s không thấy message nào -> đóng kết nối + connect lại (có token mới)
-  // Mỗi 10s kiểm tra một lần
+  /** Check nếu không nhận message trong 30s → reconnect */
   private startHealthCheck() {
     this.healthCheckInterval = setInterval(() => {
       const diff = Date.now() - this.lastMessageTime;
       if (diff > 30000) {
         console.warn('⚠️ No MQTT messages for 30s, reconnecting...');
-        this.client?.end(true);
-        this.connectToBroker();
+        this.forceReconnect();
       }
     }, 10000);
   }
-
-  // Dọn dẹp interval khi destroy
   private stopHealthCheck() {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
   }
 
+  /** Reconnect định kỳ 24h */
+  private startDailyReconnect() {
+    this.dailyReconnectTimer = setInterval(() => {
+      console.log('🕛 Daily reconnect triggered');
+      this.forceReconnect();
+    }, 24 * 60 * 60 * 1000); // 24h
+  }
+  private stopDailyReconnect() {
+    if (this.dailyReconnectTimer) clearInterval(this.dailyReconnectTimer);
+  }
+
+  /** Force disconnect & connect lại */
+  private async forceReconnect() {
+    try {
+      this.client?.end(true);
+    } catch {}
+    await this.connectToBroker();
+  }
+
+  /** Connect đến broker */
   private async connectToBroker() {
     try {
       const { token, investorId } = await this.authService.getValidToken();
       const brokerUrl = this.configService.get<string>('BROKEN_URL');
+      if (!brokerUrl) throw new NotFoundException('No broker URL provided');
 
-      if (!brokerUrl) throw new NotFoundException('Do not have any broker url !');
-      
       const clientId = `${this.configService.get<string>('CLIENT_ID')}-${Math.floor(
-        Math.random() * 1000 + 1000,
+        Math.random() * 10000,
       )}`;
 
       this.client = mqtt.connect(brokerUrl, {
@@ -71,24 +93,26 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         password: token,
         rejectUnauthorized: false,
         protocol: 'wss',
-        reconnectPeriod: 0, // Tự quản lý reconnect
+        reconnectPeriod: 0, // tự quản lý reconnect
       });
 
       this.registerEvents();
+
+      // reset delay về mức ban đầu khi connect thành công
+      this.reconnectDelay = 5000;
     } catch (err) {
-      console.error('❌ Error connecting to MQTT broker:', err);
+      console.error('❌ Error connecting to MQTT broker:', err.message);
       this.scheduleReconnect();
     }
   }
 
+  /** Xử lý sự kiện MQTT */
   private registerEvents() {
     if (!this.client) return;
 
     this.client.on('connect', () => {
       console.log('✅ MQTT connected');
-      this.client!.subscribe(
-        `${this.configService.get<string>('TOPIC')}`,
-      );
+      this.client!.subscribe(this.configService.get<string>('TOPIC') || '');
     });
 
     this.client.on('close', () => {
@@ -105,33 +129,37 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.client?.end(true);
     });
 
-    this.client.on('message', async (topic, message) => {
+    this.client.on('message', async (_, message) => {
       this.lastMessageTime = Date.now();
       try {
         const raw = JSON.parse(message.toString());
         const cleaned = this.normalizeQuote(raw);
         await this.quoteService.saveQuoteIfChanged(cleaned);
       } catch (err) {
-        console.error('📛 Error processing message:', err);
+        console.error('📛 Error processing message:', err.message);
       }
     });
   }
 
-  // Đơn giản: chờ 5s rồi gọi connectToBroker() (sẽ tự xin token mới)
-  // Có thể nâng cấp thành exponential backoff (ví dụ 1s, 2s, 3s, tối đa 30s)
+  /** Lịch reconnect có backoff */
   private scheduleReconnect() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
     console.log(`🔄 Reconnecting in ${this.reconnectDelay / 1000}s...`);
-    setTimeout(() => this.connectToBroker(), this.reconnectDelay);
+    this.reconnectTimer = setTimeout(
+      () => this.connectToBroker(),
+      this.reconnectDelay,
+    );
+
+    // tăng delay gấp đôi nhưng không quá max
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.reconnectMaxDelay);
   }
 
-  // Chuyển các field về number nếu hợp lệ, ngược lại trả về undefined
-  // Điều này giúp dữ liệu nhất quán khi lưu DB.
   private normalizeQuote(raw: any): Partial<Quote> {
-    const toNumber = (val: any): number | undefined => {
+    const toNumber = (val: any) => {
       const n = Number(val);
       return isNaN(n) ? undefined : n;
     };
-
     return {
       ...raw,
       matchPrice: toNumber(raw.matchPrice),
