@@ -64,6 +64,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.forceReconnect();
     }, 24 * 60 * 60 * 1000); // 24h
   }
+  
   private stopDailyReconnect() {
     if (this.dailyReconnectTimer) clearInterval(this.dailyReconnectTimer);
   }
