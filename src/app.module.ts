@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { MqttService } from './mqtt/mqtt.service';
 import { QuoteModule } from './quotes/quote.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { QuoteModule } from './quotes/quote.module';
     ConfigModule.forRoot({ isGlobal: true }),
     QuoteModule,
     AuthModule,
+    ScheduleModule.forRoot()
   ],
   providers: [MqttService],
 })

@@ -5,13 +5,14 @@ import { QuoteRepository } from './repositories/quote.repository'; // <- THÊM D
 import { QuoteController } from './controllers/quote.controller';
 import { QuoteGateway } from './socket/quote.gateway';
 import { QuoteService } from './services/quote.service';
+import { QuoteCacheService } from './services/quote-cache.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Quote.name, schema: QuoteSchema }]),
   ],
   controllers: [QuoteController],
-  providers: [QuoteService, QuoteGateway, QuoteRepository],
+  providers: [QuoteService, QuoteGateway, QuoteRepository, QuoteCacheService],
   exports: [QuoteService],
 })
 export class QuoteModule {}

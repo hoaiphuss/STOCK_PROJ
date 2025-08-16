@@ -45,26 +45,37 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
   /** Check nếu không nhận message trong 30s → reconnect */
   private startHealthCheck() {
+    const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 tiếng
+    const MAX_IDLE = 12 * 60 * 60 * 1000; // 12 tiếng
+
     this.healthCheckInterval = setInterval(() => {
       const diff = Date.now() - this.lastMessageTime;
-      if (diff > 30000) {
-        console.warn('⚠️ No MQTT messages for 30s, reconnecting...');
+      if (diff > MAX_IDLE) {
+        console.warn('⚠️ No MQTT messages for 12h, reconnecting...');
         this.forceReconnect();
+      } else {
+        console.log(
+          `⏳ Health check: last message ${Math.round(diff / 1000 / 60)} phút trước`,
+        );
       }
-    }, 10000);
+    }, CHECK_INTERVAL);
   }
+
   private stopHealthCheck() {
     if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
   }
 
   /** Reconnect định kỳ 24h */
   private startDailyReconnect() {
-    this.dailyReconnectTimer = setInterval(() => {
-      console.log('🕛 Daily reconnect triggered');
-      this.forceReconnect();
-    }, 24 * 60 * 60 * 1000); // 24h
+    this.dailyReconnectTimer = setInterval(
+      () => {
+        console.log('🕛 Daily reconnect triggered');
+        this.forceReconnect();
+      },
+      24 * 60 * 60 * 1000,
+    ); // 24h
   }
-  
+
   private stopDailyReconnect() {
     if (this.dailyReconnectTimer) clearInterval(this.dailyReconnectTimer);
   }
@@ -153,7 +164,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     );
 
     // tăng delay gấp đôi nhưng không quá max
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.reconnectMaxDelay);
+    this.reconnectDelay = Math.min(
+      this.reconnectDelay * 2,
+      this.reconnectMaxDelay,
+    );
   }
 
   private normalizeQuote(raw: any): Partial<Quote> {

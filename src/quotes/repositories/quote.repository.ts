@@ -3,6 +3,7 @@ import { Quote } from '../schemas/quote.schema';
 import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { QuoteGateway } from '../socket/quote.gateway';
+import { QuoteCacheService } from '../services/quote-cache.service';
 
 interface CachedQuote {
   data: Quote;
@@ -18,13 +19,14 @@ export class QuoteRepository {
   constructor(
     @InjectModel(Quote.name) private readonly quoteModel: Model<Quote>,
     private readonly quoteGateway: QuoteGateway,
+    private readonly quoteCache: QuoteCacheService,
   ) {}
 
   async saveQuoteIfChanged(data: Partial<Quote>) {
     const symbol = data.symbol;
     if (!symbol) return;
 
-    const cached = this.latestCache.get(symbol)?.data;
+    const cached = this.quoteCache.get(symbol);
 
     // So sánh các trường quan trọng
     const isChanged =
@@ -45,29 +47,10 @@ export class QuoteRepository {
     );
 
     // Cập nhật cache
-    this.latestCache.set(symbol, {
-      data: data as Quote,
-      updatedAt: Date.now(),
-    });
+    this.quoteCache.set(symbol, data as Quote);
 
     // Gửi realtime tới FE
     this.quoteGateway.sendQuoteUpdate(data);
-
     this.logger.debug(`Updated quote for ${symbol}`);
-  }
-
-  /** Dọn cache quá cũ để tránh memory leak */
-  cleanupCache() {
-    const now = Date.now();
-    let removed = 0;
-    for (const [symbol, { updatedAt }] of this.latestCache.entries()) {
-      if (now - updatedAt > this.cacheTTL) {
-        this.latestCache.delete(symbol);
-        removed++;
-      }
-    }
-    if (removed > 0) {
-      this.logger.debug(`Cleaned up ${removed} stale cache entries`);
-    }
   }
 }
