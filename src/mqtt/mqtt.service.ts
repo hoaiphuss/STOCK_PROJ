@@ -154,19 +154,22 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Lịch reconnect có backoff */
+  /** Lịch reconnect với exponential backoff + jitter */
   private scheduleReconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
-    console.log(`🔄 Reconnecting in ${this.reconnectDelay / 1000}s...`);
-    this.reconnectTimer = setTimeout(
-      () => this.connectToBroker(),
-      this.reconnectDelay,
-    );
+    // thêm jitter (random từ 0 đến 1/2 delay)
+    const jitter = Math.floor(Math.random() * (this.reconnectDelay / 2));
+    const delay = this.reconnectDelay + jitter;
 
-    // tăng delay gấp đôi nhưng không quá max
+    console.log(`🔄 Reconnecting in ~${Math.round(delay / 1000)}s...`);
+
+    this.reconnectTimer = setTimeout(() => this.connectToBroker(), delay);
+
+    // tăng delay gấp đôi nhưng max 15 phút
     this.reconnectDelay = Math.min(
       this.reconnectDelay * 2,
-      this.reconnectMaxDelay,
+      15 * 60 * 1000, // 15 phút
     );
   }
 

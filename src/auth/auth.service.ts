@@ -10,6 +10,8 @@ import extractTokenExpiry from './helpers/extract-token-expiry.helper';
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private tokenPromise: Promise<{ token: string; investorId: string }> | null =
+    null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -17,17 +19,45 @@ export class AuthService {
   ) {}
 
   async getValidToken(): Promise<{ token: string; investorId: string }> {
-    // Only one token in database, so using fineOne()
+    // Kiểm tra token trong DB trước
     const auth = await this.authModel.findOne();
 
     if (auth && isTokenValid(auth.token, auth.tokenExpiresAt)) {
       return { token: auth.token, investorId: auth.investorId };
     }
 
-    const { token, investorId } = await this.authenticate();
-    await this.saveTokenToDB(token, investorId);
+    // Nếu có promise đang chạy, chờ nó hoàn thành
+    if (this.tokenPromise) {
+      return this.tokenPromise;
+    }
 
-    return { token, investorId };
+    // Tạo promise mới cho việc lấy token
+    this.tokenPromise = this.authenticateAndSaveToken();
+
+    try {
+      const result = await this.tokenPromise;
+      return result;
+    } finally {
+      // Reset promise sau khi hoàn thành (thành công hoặc lỗi)
+      this.tokenPromise = null;
+    }
+  }
+
+  private async authenticateAndSaveToken(): Promise<{
+    token: string;
+    investorId: string;
+  }> {
+    try {
+      const { token, investorId } = await this.authenticate();
+      await this.saveTokenToDB(token, investorId);
+      return { token, investorId };
+    } catch (error) {
+      this.logger.error(
+        'Authentication failed in authenticateAndSaveToken',
+        error,
+      );
+      throw error;
+    }
   }
 
   private async authenticate(): Promise<{ token: string; investorId: string }> {
@@ -37,24 +67,28 @@ export class AuthService {
     const password = this.configService.get<string>('PASSWORD');
 
     if (!authUrl || !meUrl || !username || !password) {
-      throw new NotFoundException('Missing Authentication Infomation in config');
+      throw new NotFoundException(
+        'Missing Authentication Information in config',
+      );
     }
 
     try {
-      // Call API get token
+      // Gọi API để lấy token
       const authRes = await axios.post(authUrl, { username, password });
       const token = authRes?.data?.token;
-      if (!token)
+      if (!token) {
         throw new NotFoundException('Token not returned from auth API');
+      }
 
-      // Call API get Investor Id
+      // Gọi API để lấy Investor ID
       const meRes = await axios.get(meUrl, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const investorId = meRes.data?.investorId;
-      if (!investorId) throw new NotFoundException('Investor ID not found');
+      if (!investorId) {
+        throw new NotFoundException('Investor ID not found');
+      }
 
-      // Returen both token and investor id
       return { token, investorId };
     } catch (error) {
       this.logger.error('Authentication failed', error);
