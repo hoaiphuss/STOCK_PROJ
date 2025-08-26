@@ -10,8 +10,7 @@ import extractTokenExpiry from './helpers/extract-token-expiry.helper';
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private tokenPromise: Promise<{ token: string; investorId: string }> | null =
-    null;
+  private tokenPromise: Promise<{ token: string; investorId: string }> | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -33,7 +32,7 @@ export class AuthService {
 
     // Tạo promise mới cho việc lấy token
     this.tokenPromise = this.authenticateAndSaveToken();
-
+    
     try {
       const result = await this.tokenPromise;
       return result;
@@ -43,19 +42,13 @@ export class AuthService {
     }
   }
 
-  private async authenticateAndSaveToken(): Promise<{
-    token: string;
-    investorId: string;
-  }> {
+  private async authenticateAndSaveToken(): Promise<{ token: string; investorId: string }> {
     try {
       const { token, investorId } = await this.authenticate();
       await this.saveTokenToDB(token, investorId);
       return { token, investorId };
     } catch (error) {
-      this.logger.error(
-        'Authentication failed in authenticateAndSaveToken',
-        error,
-      );
+      this.logger.error('Authentication failed in authenticateAndSaveToken', error);
       throw error;
     }
   }
@@ -67,9 +60,7 @@ export class AuthService {
     const password = this.configService.get<string>('PASSWORD');
 
     if (!authUrl || !meUrl || !username || !password) {
-      throw new NotFoundException(
-        'Missing Authentication Information in config',
-      );
+      throw new NotFoundException('Missing Authentication Information in config');
     }
 
     try {
@@ -96,10 +87,7 @@ export class AuthService {
     }
   }
 
-  private async saveTokenToDB(
-    token: string,
-    investorId: string,
-  ): Promise<void> {
+  private async saveTokenToDB(token: string, investorId: string): Promise<void> {
     await this.authModel.findOneAndUpdate(
       {},
       {
